@@ -12,6 +12,7 @@ import numpy as np
 MINOVERLAP = 0.5 # default value (defined in the PASCAL VOC2012 challenge)
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--eval_folder', help="name of the detection result folder")
 parser.add_argument('-na', '--no-animation', help="no animation is shown.", action="store_true")
 parser.add_argument('-np', '--no-plot', help="no plot is shown.", action="store_true")
 parser.add_argument('-q', '--quiet', help="minimalistic console output.", action="store_true")
@@ -45,7 +46,7 @@ if args.set_class_iou is not None:
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 GT_PATH = os.path.join(os.getcwd(), 'input', 'ground-truth')
-DR_PATH = os.path.join(os.getcwd(), 'input', 'detection-results')
+DR_PATH = os.path.join(os.getcwd(), 'input', 'detection-results', args.eval_folder)
 # if there are no images then no animation can be shown
 IMG_PATH = os.path.join(os.getcwd(), 'input', 'images-optional')
 if os.path.exists(IMG_PATH): 
@@ -336,12 +337,10 @@ def draw_plot_func(dictionary, n_classes, window_title, plot_title, x_label, out
 TEMP_FILES_PATH = ".temp_files"
 if not os.path.exists(TEMP_FILES_PATH): # if it doesn't exist already
     os.makedirs(TEMP_FILES_PATH)
-results_files_path = "results"
+results_files_path = f"results/{args.eval_folder}"
 if os.path.exists(results_files_path): # if it exist already
-    # reset the results directory
     shutil.rmtree(results_files_path)
-
-os.makedirs(results_files_path)
+os.mkdir(results_files_path)
 if draw_plot:
     os.makedirs(os.path.join(results_files_path, "classes"))
 if show_animation:
@@ -362,7 +361,7 @@ gt_counter_per_class = {}
 counter_images_per_class = {}
 
 for txt_file in ground_truth_files_list:
-    #print(txt_file)
+
     file_id = txt_file.split(".txt", 1)[0]
     file_id = os.path.basename(os.path.normpath(file_id))
     # check if there is a correspondent detection-results file
@@ -423,8 +422,6 @@ gt_classes = list(gt_counter_per_class.keys())
 # let's sort the classes alphabetically
 gt_classes = sorted(gt_classes)
 n_classes = len(gt_classes)
-#print(gt_classes)
-#print(gt_counter_per_class)
 
 """
  Check format of the flag --set-class-iou (if used)
@@ -461,7 +458,6 @@ dr_files_list.sort()
 for class_index, class_name in enumerate(gt_classes):
     bounding_boxes = []
     for txt_file in dr_files_list:
-        #print(txt_file)
         # the first time it checks if all the corresponding ground-truth files exist
         file_id = txt_file.split(".txt",1)[0]
         file_id = os.path.basename(os.path.normpath(file_id))
@@ -481,10 +477,8 @@ for class_index, class_name in enumerate(gt_classes):
                 error_msg += " Received: " + line
                 error(error_msg)
             if tmp_class_name == class_name:
-                #print("match")
                 bbox = left + " " + top + " " + right + " " +bottom
                 bounding_boxes.append({"confidence":confidence, "file_id":file_id, "bbox":bbox})
-                #print(bounding_boxes)
     # sort detection-results by decreasing confidence
     bounding_boxes.sort(key=lambda x:float(x['confidence']), reverse=True)
     with open(TEMP_FILES_PATH + "/" + class_name + "_dr.json", 'w') as outfile:
@@ -496,6 +490,7 @@ for class_index, class_name in enumerate(gt_classes):
 sum_AP = 0.0
 ap_dictionary = {}
 lamr_dictionary = {}
+APs = {}
 # open file to store the results
 with open(results_files_path + "/results.txt", 'w') as results_file:
     results_file.write("# AP and precision/recall per class\n")
@@ -525,7 +520,6 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
                 elif len(ground_truth_img) > 1:
                     error("Error. Multiple image with id: " + file_id)
                 else: # found image
-                    #print(IMG_PATH + "/" + ground_truth_img[0])
                     # Load image
                     img = cv2.imread(IMG_PATH + "/" + ground_truth_img[0])
                     # load image with draws of multiple detections
@@ -649,7 +643,7 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
                 # save the image with all the objects drawn to it
                 cv2.imwrite(img_cumulative_path, img_cumulative)
 
-        #print(tp)
+
         # compute precision/recall
         cumsum = 0
         for idx, val in enumerate(fp):
@@ -659,19 +653,22 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
         for idx, val in enumerate(tp):
             tp[idx] += cumsum
             cumsum += val
-        #print(tp)
+
         rec = tp[:]
         for idx, val in enumerate(tp):
             rec[idx] = float(tp[idx]) / gt_counter_per_class[class_name]
-        #print(rec)
+
         prec = tp[:]
         for idx, val in enumerate(tp):
             prec[idx] = float(tp[idx]) / (fp[idx] + tp[idx])
-        #print(prec)
+
 
         ap, mrec, mprec = voc_ap(rec[:], prec[:])
         sum_AP += ap
         text = "{0:.2f}%".format(ap*100) + " = " + class_name + " AP " #class_name + " AP = {0:.2f}%".format(ap*100)
+
+        APs[class_name] = ap
+
         """
          Write to results.txt
         """
@@ -729,6 +726,10 @@ with open(results_files_path + "/results.txt", 'w') as results_file:
 # remove the temp_files directory
 shutil.rmtree(TEMP_FILES_PATH)
 
+# write APs to json
+with open(os.path.join(results_files_path, 'eval.json'), 'w') as outfile:  
+    json.dump(APs, outfile)
+
 """
  Count total of detection-results
 """
@@ -748,7 +749,7 @@ for txt_file in dr_files_list:
         else:
             # if class didn't exist yet
             det_counter_per_class[class_name] = 1
-#print(det_counter_per_class)
+
 dr_classes = list(det_counter_per_class.keys())
 
 
@@ -790,7 +791,7 @@ for class_name in dr_classes:
     # if class exists in detection-result but not in ground-truth then there are no true positives in that class
     if class_name not in gt_classes:
         count_true_positives[class_name] = 0
-#print(count_true_positives)
+
 
 """
  Plot the total number of occurences of each class in the "detection-results" folder
@@ -862,7 +863,7 @@ if draw_plot:
     plot_title = "mAP = {0:.2f}%".format(mAP*100)
     x_label = "Average Precision"
     output_path = results_files_path + "/mAP.png"
-    to_show = True
+    to_show = False
     plot_color = 'royalblue'
     draw_plot_func(
         ap_dictionary,
